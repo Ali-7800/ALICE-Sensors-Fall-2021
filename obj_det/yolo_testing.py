@@ -29,8 +29,8 @@ parser.add_argument('--webcam', help="True/False", default=False)
 parser.add_argument('--test', help="True/False", default=False)
 parser.add_argument('--play_video', help="Tue/False", default=False)
 parser.add_argument('--image', help="Tue/False", default=False)
-parser.add_argument('--video_path', help="Path of video file", default="videos/car_on_road.mp4")
-parser.add_argument('--image_path', help="Path of image to detect objects", default="Images/bicycle.jpg")
+parser.add_argument('--video_path', help="Path of video file", default="/home/pi/ME470/obj_det/videos/car_on_road.mp4")
+parser.add_argument('--image_path', help="Path of image to detect objects", default="/home/pi/ME470/obj_det/Images/bicycle.jpg")
 parser.add_argument('--verbose', help="To print statements", default=True)
 args = parser.parse_args()
 
@@ -45,7 +45,7 @@ def load_yolo():
 	netD.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
 	netD.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
 	classes = []
-	with open("_classes_t1.txt", "r") as f:
+	with open("/home/pi/ME470/obj_det/_classes_t1.txt", "r") as f:
 		classes = [line.strip() for line in f.readlines()]
 
 	layers_namesL = netL.getLayerNames()
@@ -95,34 +95,45 @@ def send_notif(x,y,w,h,height,width):
 	global last_right_notif
 	#print(x)
 	#print(y)
-	leftwheel=width/2-y/1
+	leftwheel=width/2-100
 	rightwheel=width/2
-	if(x < leftwheel+width/10 and x+w>rightwheel-width/10) or ((x < leftwheel+width/10 and x+w > leftwheel-width/10) and ( x < rightwheel+width/10 and x+w> rightwheel-width/10)):
-		if time.time()-last_notif>2:
-			print('Hazard')
-			GPIO.output(left, GPIO.HIGH)
-			GPIO.output(right, GPIO.HIGH)
-			time.sleep(0.01)
-			GPIO.output(left, GPIO.LOW)
-			GPIO.output(right, GPIO.LOW)
-			last_notif=time.time()
+	m = (354-240)/(149-320)
+	xc = x+w/2
+	yc = y+h/2
+	xl = x
+	yl = y + h
+	xr = x + w
+	yr = yl
+	if (((xl<320 and xr>320) and yl>240)or((yr-240)>m*(xr-320) and xr<320)):
+	
+		if((yc-240)>m*(xc-320) and xc<320):
+			if time.time()-last_notif>2:
+				print('Hazard')
+				GPIO.output(left, GPIO.HIGH)
+				GPIO.output(right, GPIO.HIGH)
+				time.sleep(0.01)
+				GPIO.output(left, GPIO.LOW)
+				GPIO.output(right, GPIO.LOW)
+				last_notif=time.time()
+			#print('time.time()',time.time())
+		elif(xc<320):
+			if time.time()-last_left_notif>2:
+				print('Hazard Left')
+				GPIO.output(left, GPIO.HIGH)
+				time.sleep(0.01)
+				GPIO.output(left, GPIO.LOW)
+				last_left_notif=time.time()
+			#print('time.time()',time.time())
+		else:
+			if time.time()-last_right_notif>2:
+				print('Hazard Right')
+				GPIO.output(right, GPIO.HIGH)
+				time.sleep(0.01)
+				GPIO.output(right, GPIO.LOW)
+				last_right_notif=time.time()
 		#print('time.time()',time.time())
-	if( x < leftwheel+width/10 and x+w > leftwheel-width/10):
-		if time.time()-last_left_notif>2:
-			print('Hazard Left')
-			GPIO.output(left, GPIO.HIGH)
-			time.sleep(0.01)
-			GPIO.output(left, GPIO.LOW)
-			last_left_notif=time.time()
-		#print('time.time()',time.time())
-	if( x < rightwheel+width/10 and x+w> rightwheel-width/10):
-		if time.time()-last_right_notif>2:
-			print('Hazard Right')
-			GPIO.output(right, GPIO.HIGH)
-			time.sleep(0.01)
-			GPIO.output(right, GPIO.LOW)
-			last_right_notif=time.time()
-		#print('time.time()',time.time())
+	else:
+	    print("No Hazard Detected")
 	return last_notif
 
 
@@ -164,17 +175,22 @@ def draw_labels(boxes, confs, colors, class_ids, classes, img, height, width):
 		if i in indexes:
 			x, y, w, h = boxes[i]
 			center_y = int(y + h/2)
+			center_x = int(x + w/2)
 			#height = 605
 			#width = 806
 			#print(center_y)
 			#print(height)
-			print(center_y)
-			if center_y > 480 / 2 and center_y<(7*480/8):
+			print(center_x,center_y)
+			if center_y > 480 / 4:
 				send_notif(x, y, w, h, 480, 640)
 			label = str(classes[class_ids[i]]) + " " + str(confs[i])
 			color = [255, 0, 0]
 			cv2.rectangle(img, (x,y), (x+w, y+h), color, 2)
 			cv2.putText(img, label, (x, y - 5), font, 1, color, 1)
+			
+	return img
+		
+		
 	#cv2.imwrite(output, img)
 
 def image_detect(img_path):
@@ -197,7 +213,8 @@ def webcam_detect():
 	netL, netD, classes, colors, output_layersL, output_layersD = load_yolo()
 	cap = start_webcam()
 	while True:
-		_, frame = cap.read()
+		for i in range(12):
+			_, frame = cap.read()
 		height, width, channels = frame.shape
 		value = np.mean(frame)
 		if value<110:
@@ -207,10 +224,14 @@ def webcam_detect():
 		    blob, outputs = detect_objects(frame, netL, output_layersL)
 		    print("Light")
 		boxes, confs, class_ids = get_box_dimensions(outputs, height, width,classes)
-		draw_labels(boxes, confs, colors, class_ids, classes, frame, height, width)
-		key = cv2.waitKey(1)
-		if key == 27:
-			break
+		frame = draw_labels(boxes, confs, colors, class_ids, classes, frame, height, width)
+		d = 10
+		frame = cv2.line(frame, (320,240), (144,480), (0, 255, 0), 2)
+		frame = cv2.line(frame, (320,240), (320,480), (0, 0, 255), 2)
+		frame = cv2.line(frame, (320,240), (0,453), (0, 0, 255), 2)
+		frame = cv2.resize(frame, (1280, 960))
+		cv2.imshow("feed",frame)
+		cv2.waitKey(10)
 	cap.release()
 
 
